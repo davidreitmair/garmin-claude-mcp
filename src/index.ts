@@ -41,6 +41,56 @@ export class MyMCP extends McpAgent {
     );
 
     this.server.tool(
+      "getActivityStreams",
+      "Zeitverlauf einer Aktivität (Sekunde, HF, Tempo in m/s, Distanz), ausgedünnt auf einen Punkt alle stepSecs Sekunden",
+      {
+        activityId: z.string().describe("Activity id from getRecentActivities, e.g. i208719600"),
+        stepSecs: z.number().optional().describe("Seconds between points, default 5"),
+      },
+      async ({ activityId, stepSecs = 5 }) => {
+        const streams = await this.icu(
+          `/activity/${activityId}/streams.json?types=time,heartrate,velocity_smooth,distance`,
+        );
+        const get = (t: string): number[] => (streams as any[]).find((s) => s.type === t)?.data ?? [];
+        const time = get("time");
+        const hr = get("heartrate");
+        const v = get("velocity_smooth");
+        const d = get("distance");
+        const data: (number | null)[][] = [];
+        let next = 0;
+        for (let i = 0; i < time.length; i++) {
+          if (time[i] >= next) {
+            data.push([time[i], hr[i] ?? null, v[i] ?? null, d[i] ?? null]);
+            next = time[i] + stepSecs;
+          }
+        }
+        return {
+          content: [{ type: "text", text: JSON.stringify({ columns: ["sek", "hf", "m_pro_s", "meter"], data }) }],
+        };
+      },
+    );
+
+    this.server.tool(
+      "getActivityIntervals",
+      "Von intervals.icu erkannte Intervalle einer Aktivität (Start, Ende, Dauer, Distanz, Tempo, HF)",
+      { activityId: z.string().describe("Activity id from getRecentActivities, e.g. i208719600") },
+      async ({ activityId }) => {
+        const j = await this.icu(`/activity/${activityId}/intervals`);
+        const intervals = ((j as any).icu_intervals ?? []).map((x: any) => ({
+          typ: x.type,
+          start: x.start_time,
+          ende: x.end_time,
+          dauer: x.moving_time,
+          meter: x.distance,
+          m_pro_s: x.average_speed,
+          hf: x.average_heartrate,
+          hf_max: x.max_heartrate,
+        }));
+        return { content: [{ type: "text", text: JSON.stringify(intervals) }] };
+      },
+    );
+
+    this.server.tool(
       "getWellness",
       { days: z.number().optional().describe("Days back, default 7") },
       async ({ days = 7 }) => {
